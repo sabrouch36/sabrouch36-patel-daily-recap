@@ -1,5 +1,5 @@
 # Patel Logistics – Daily Operations Recap (Sheets + CSV fallback, no charts)
-# Run: python -m streamlit run app.py
+# Run locally:  python -m streamlit run app.py
 
 import io
 import os
@@ -9,18 +9,23 @@ from typing import Dict, List
 
 import pandas as pd
 import streamlit as st
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import cm
 
-# Optional Google Sheets libs (used only if secrets are configured)
+# -------- PDF (optional on cloud) --------
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    REPORTLAB_AVAILABLE = True
+except Exception:
+    REPORTLAB_AVAILABLE = False
+
+# -------- Google Sheets (optional via secrets) --------
 try:
     from google.oauth2.service_account import Credentials
     import gspread
     from gspread_dataframe import get_as_dataframe, set_with_dataframe
-    GS_AVAILABLE = True
+    GS_LIBS_OK = True
 except Exception:
-    GS_AVAILABLE = False
+    GS_LIBS_OK = False
 
 st.set_page_config(page_title="Patel Logistics – Daily Recap", page_icon="📢", layout="wide")
 
@@ -55,7 +60,7 @@ def empty_row() -> Dict:
 
 # ---------- Storage: Sheets or CSV ----------
 def sheets_enabled() -> bool:
-    if not GS_AVAILABLE:
+    if not GS_LIBS_OK:
         return False
     try:
         _ = st.secrets["gcp_service_account"]
@@ -81,20 +86,21 @@ def _get_ws():
     return ws
 
 def load_all() -> pd.DataFrame:
+    # Prefer Sheets
     if sheets_enabled():
         try:
             ws = _get_ws()
             df = get_as_dataframe(ws, evaluate_formulas=True, header=1).dropna(how="all")
             if df.empty:
                 return pd.DataFrame(columns=COLUMNS)
-            # keep only known columns + order
-            df = df[[c for c in COLUMNS if c in df.columns]]
-            return df
+            # keep only known columns in order
+            cols = [c for c in COLUMNS if c in df.columns]
+            return df[cols]
         except Exception:
             st.warning("Google Sheets unavailable, using local CSV temporarily.")
             st.caption(traceback.format_exc())
 
-    # CSV fallback
+    # Fallback to CSV
     if not os.path.exists(DATA_FILE):
         pd.DataFrame(columns=COLUMNS).to_csv(DATA_FILE, index=False)
     try:
@@ -104,6 +110,7 @@ def load_all() -> pd.DataFrame:
     return df
 
 def save_entry(entry: Dict):
+    # Try Sheets first
     if sheets_enabled():
         try:
             ws = _get_ws()
@@ -143,10 +150,9 @@ def auth_gate():
     try:
         required = st.secrets["security"]["app_password"]
     except Exception:
-        # no password configured -> skip gate
-        return
+        return  # no password configured
     with st.expander("Sign in", expanded=True):
-        pwd = st.text_input("App password", type="password")
+        pwd = st.text_input("App password", type="password", placeholder="Enter app password")
         if pwd != required:
             st.stop()
 
@@ -262,21 +268,22 @@ def export_excel_row(entry: Dict) -> bytes:
     return output.getvalue()
 
 def export_pdf(entry: Dict) -> bytes:
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab not available on this server")
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     w, h = A4
-    y = h - 2*cm
+    y = h - 72
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(2*cm, y, f"Daily Operations Recap – {entry['day']} {entry['the_date']}")
-    y -= 16
+    c.drawString(50, y, f"Daily Operations Recap – {entry['day']} {entry['the_date']}")
+    y -= 18
     c.setFont("Helvetica", 10)
     for line in render_message(entry).splitlines():
         if not line.strip():
             y -= 6; continue
-        c.drawString(2*cm, y, line[:110])
-        y -= 12
-        if y < 2*cm:
-            c.showPage(); c.setFont("Helvetica", 10); y = h - 2*cm
+        c.drawString(50, y, line[:110]); y -= 12
+        if y < 50:
+            c.showPage(); c.setFont("Helvetica", 10); y = h - 72
     c.showPage(); c.save()
     return buffer.getvalue()
 
@@ -355,6 +362,7 @@ def main():
     st.divider()
     # Validate & Save
     save_col, exp_xlsx, exp_pdf, backup_col = st.columns([1,1,1,1])
+
     with save_col:
         if st.button("💾 Save"):
             errs = validate(entry)
@@ -373,14 +381,17 @@ def main():
         )
 
     with exp_pdf:
-        try:
-            st.download_button(
-                "⬇️ PDF (.pdf)",
-                data=export_pdf(entry),
-                file_name=f"daily_recap_{entry['the_date']}.pdf"
-            )
-        except Exception as e:
-            st.warning(f"PDF export failed: {e}")
+        if REPORTLAB_AVAILABLE:
+            try:
+                st.download_button(
+                    "⬇️ PDF (.pdf)",
+                    data=export_pdf(entry),
+                    file_name=f"daily_recap_{entry['the_date']}.pdf"
+                )
+            except Exception as e:
+                st.warning(f"PDF export failed: {e}")
+        else:
+            st.info("PDF export is unavailable on this server.")
 
     with backup_col:
         if st.button("🗄 Backup (Sheets)"):
