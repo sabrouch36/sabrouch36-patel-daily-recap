@@ -260,12 +260,13 @@ def validate(entry: Dict) -> List[str]:
     return errs
 
 # ---------- Exports ----------
-def export_excel_row(entry: Dict) -> bytes:
+def export_excel_row(entry: dict) -> bytes:
     output = io.BytesIO()
     df = pd.DataFrame([entry])[COLUMNS]
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Daily Recap")
     return output.getvalue()
+
 
 def export_pdf(entry: Dict) -> bytes:
     if not REPORTLAB_AVAILABLE:
