@@ -263,13 +263,13 @@ def validate(entry: Dict) -> List[str]:
 def export_excel_row(entry: dict) -> bytes:
     output = io.BytesIO()
     df = pd.DataFrame([entry])[COLUMNS]
-# Try openpyxl first, fallback to xlsxwriter
-try:
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Daily Recap")
-except Exception:
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="Daily Recap")
+    # Try openpyxl first, fallback to xlsxwriter
+    try:
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Daily Recap")
+    except Exception:
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            df.to_excel(writer, index=False, sheet_name="Daily Recap")
     return output.getvalue()
 
 
